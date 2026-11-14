@@ -2,12 +2,13 @@ import { redirect } from "next/navigation";
 import { currentAccess } from "@/lib/guard";
 import Header from "@/components/Header";
 import Scout from "@/components/Scout";
+import Landing from "@/components/Landing";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const a = await currentAccess();
-  if (a.state === "anon") redirect("/login");
+  if (a.state === "anon") return <Landing />;
   if (a.state !== "approved") redirect("/pending");
   return (
     <>

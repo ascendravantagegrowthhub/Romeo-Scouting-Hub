@@ -16,6 +16,7 @@ export default async function Login() {
         <h1>Romeo Hub</h1>
         <p className="sub">Sign in with your Google account. New accounts are reviewed before access is granted.</p>
         <GoogleButton />
+        <p className="fine"><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></p>
       </div>
     </main>
   );
