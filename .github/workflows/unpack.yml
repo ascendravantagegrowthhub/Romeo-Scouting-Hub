@@ -1,0 +1,21 @@
+name: Unpack
+on:
+  workflow_dispatch:
+  push:
+    paths: ["*.zip"]
+permissions:
+  contents: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          for z in *.zip; do unzip -oq "$z" -d _unpack; done
+          cp -r _unpack/*/. .
+          rm -rf _unpack *.zip
+          git config user.name "unpack-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A
+          git commit -m "Unpack Romeo Hub"
+          git push
