@@ -37,7 +37,7 @@ export default function Privacy() {
         <li>Supabase, which stores account status, encrypted Gmail tokens and the send log.</li>
         <li>Google, for sign-in and sending email through Gmail.</li>
         <li>Resend, which delivers approval notification emails to the site owner.</li>
-        <li>Anthropic, which receives a store’s public details and your offer text to write a draft email.</li>
+        <li>Anthropic or Google (Gemini), which receives a store’s public details and your offer text to write a draft email.</li>
         <li>Serper or Brave Search, which receive the search terms you enter when finding stores.</li>
       </ul>
 
