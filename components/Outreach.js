@@ -59,8 +59,8 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
     setDrafting(true); stopRef.current = false; setMsg("");
     const todo = queue.filter((l) => ["none", "error"].includes(st(l)));
     let i = 0;
-    const worker = async () => { while (!stopRef.current) { const l = todo[i++]; if (!l) return; await draftOne(l); } };
-    await Promise.all([worker(), worker()]);
+    const worker = async () => { while (!stopRef.current) { const l = todo[i++]; if (!l) return; await draftOne(l); await sleep(3000); } };
+    await worker();
     setDrafting(false);
   }
 
