@@ -89,3 +89,12 @@ tbody tr:hover{background:rgba(233,184,36,.12)}
 .grid3 .card{margin:0}.land .card li,.land .card p{line-height:1.6}
 .land .card ul{padding-left:20px}
 .lfoot{text-align:center;color:var(--mute);font-size:14px;padding:18px 0}
+@media (max-width:640px){
+  .top{padding:8px 10px;gap:8px;flex-wrap:nowrap}
+  .brand{font-size:16px;white-space:nowrap}.brand img{width:28px;height:28px}
+  .who{flex-wrap:nowrap;gap:6px}.who .nm{display:none}
+  .who .b{padding:7px 10px;font-size:13px}
+  .wrap{padding:14px 12px 60px}
+  .hero{gap:12px}.hero h1{font-size:24px}.me{width:64px;height:64px}
+  .stat{gap:14px}
+}

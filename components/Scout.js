@@ -6,7 +6,7 @@ const STAGES = ["new", "contacted", "replied", "won", "skip"];
 const CFG = { niche: "", mode: "existing", provider: "serper", depth: 1, country: "us", autoScan: true };
 
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
-const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
 
 function parseHosts(text) {
   const out = new Set();
@@ -38,6 +38,7 @@ export default function Scout() {
   const [msg, setMsg] = useState("");
   const [paste, setPaste] = useState("");
   const [filter, setFilter] = useState("all");
+  const [full, setFull] = useState(false);
   const leadsRef = useRef([]);
   const runRef = useRef(false);
   const stopRef = useRef(false);
@@ -54,7 +55,7 @@ export default function Scout() {
   useEffect(() => { if (ready) save("ss-cfg", cfg); }, [cfg, ready]);
   useEffect(() => { if (ready) save("ss-supp", suppress); }, [suppress, ready]);
 
-  const commit = (n) => { leadsRef.current = n; setLeads(n); save("ss-leads", n); };
+  const commit = (n) => { leadsRef.current = n; setLeads(n); setFull(!save("ss-leads", n)); };
   const patch = (domain, f) => commit(leadsRef.current.map((l) => (l.domain === domain ? { ...l, ...f } : l)));
   const blocked = () => suppress.toLowerCase().split(/[\s,;]+/).filter(Boolean);
   const isBlocked = (l) => { const b = blocked(); return b.includes((l.site || l.domain).toLowerCase()) || (l.email && b.includes(l.email.toLowerCase())); };
@@ -92,7 +93,7 @@ export default function Scout() {
           const r = await api("/api/scan", { domains: [d] });
           const res = r.results?.[0];
           if (!res) throw new Error(r.error || "No result");
-          patch(d, { scan: res.error && !res.isShopify ? "error" : "done", isShopify: res.isShopify, site: res.site || d, title: res.title, emails: res.emails, email: res.emails[0] || "", profile: res.profile, error: res.error || "" });
+          patch(d, { scan: res.error && !res.isShopify ? "error" : "done", isShopify: res.isShopify, site: res.site || d, title: res.title, emails: res.emails, email: res.emails[0] || "", profile: res.profile, score: res.score, error: res.error || "" });
         } catch (e) { patch(d, { scan: "error", error: String(e.message || e) }); }
         done++; setProg({ done, total: todo.length });
       }
@@ -132,9 +133,9 @@ export default function Scout() {
   }
 
   const c = (f) => leads.filter(f).length;
-  const shown = leads.filter((l) => {
+  const shown = [...leads].sort((a, b) => (b.score ?? -1) - (a.score ?? -1)).filter((l) => {
     const [s] = status(l);
-    return filter === "all" || (filter === "email" && s === "Email found") || (filter === "noemail" && s === "No email") || (filter === "notshop" && s === "Not Shopify") || (filter === "queued" && s === "Queued") || (filter === "error" && s === "Error");
+    return filter === "all" || (filter === "best" && l.isShopify && l.email && (l.score ?? 0) >= 60) || (filter === "email" && s === "Email found") || (filter === "noemail" && s === "No email") || (filter === "notshop" && s === "Not Shopify") || (filter === "queued" && s === "Queued") || (filter === "error" && s === "Error");
   });
   const set = (k) => (e) => setCfg({ ...cfg, [k]: e.target.value });
   const noKeys = conf && !conf.serper && !conf.brave;
@@ -146,6 +147,8 @@ export default function Scout() {
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}{k === "leads" && <span className="n">{leads.length}</span>}</button>
         ))}
       </nav>
+
+      {full && <div className="card"><p className="note" style={{ margin: 0 }}>Your browser storage is full, so new changes are not being saved. Download a CSV, then tap Tidy up or Clear all in the Leads tab.</p></div>}
 
       {(running || prog.total > 0) && (
         <div className="card">
@@ -202,20 +205,22 @@ export default function Scout() {
         <div className="card">
           <div className="row">
             <div><label htmlFor="flt">Show</label><select id="flt" value={filter} onChange={(e) => setFilter(e.target.value)}>
-              <option value="all">All</option><option value="email">Email found</option><option value="noemail">No email</option><option value="notshop">Not Shopify</option><option value="queued">Queued</option><option value="error">Errors</option></select></div>
+              <option value="all">All</option><option value="best">Best leads (60+)</option><option value="email">Email found</option><option value="noemail">No email</option><option value="notshop">Not Shopify</option><option value="queued">Queued</option><option value="error">Errors</option></select></div>
           </div>
           <div style={{ marginTop: 12 }}>
             <button className="b g" onClick={exportCsv}>Download CSV</button>
             <button className="b g" onClick={() => { commit(leadsRef.current.map((l) => (l.scan === "error" ? { ...l, scan: "queued", error: "" } : l))); runQueue(); }}>Retry errors</button>
+            <button className="b g" onClick={() => { if (confirm("Remove non-Shopify and skipped stores, and trim saved details of finished leads?")) commit(leadsRef.current.filter((l) => l.isShopify || l.scan === "queued").filter((l) => l.stage !== "skip").map((l) => (["replied", "won"].includes(l.stage) ? { ...l, profile: undefined } : l))); }}>Tidy up</button>
             <button className="b g" onClick={() => { if (confirm("Delete all leads?")) commit([]); }}>Clear all</button>
           </div>
         </div>
         <div className="card tw">
           {shown.length ? (<table>
-            <thead><tr><th>Store</th><th>Status</th><th>Email</th><th>Name</th><th>Stage</th><th></th></tr></thead>
+            <thead><tr><th>Store</th><th>Score</th><th>Status</th><th>Email</th><th>Name</th><th>Stage</th><th></th></tr></thead>
             <tbody>{shown.map((l) => { const [s, k] = status(l); return (
               <tr key={l.domain}>
                 <td><a className="dom" href={"https://" + (l.site || l.domain)} target="_blank" rel="noopener noreferrer">{l.site || l.domain}</a>{l.title && <div style={{ fontSize: 12, color: "var(--mute)" }}>{l.title.slice(0, 48)}</div>}</td>
+                <td>{l.score != null ? <span className={"badge " + (l.score >= 70 ? "ok" : l.score >= 45 ? "warn" : "bad")}>{l.score}</span> : ""}</td>
                 <td><span className={"badge " + k} title={l.error}>{s}</span></td>
                 <td><input list={"em-" + l.domain} value={l.email} onChange={(e) => patch(l.domain, { email: e.target.value.trim() })} placeholder="email" /><datalist id={"em-" + l.domain}>{(l.emails || []).map((e) => <option key={e} value={e} />)}</datalist></td>
                 <td><input value={l.name} onChange={(e) => patch(l.domain, { name: e.target.value })} placeholder="first name" /></td>

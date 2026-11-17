@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentAccess } from "@/lib/guard";
-import { getToken, delToken, countSends, hasSent, logSend } from "@/lib/db";
+import { getToken, delToken, countSends, hasSent, countTo, logSend } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import { refreshAccess, buildRaw, sendMail } from "@/lib/gmail";
 
@@ -21,7 +21,8 @@ export async function POST(req) {
     if (!t) return fail("Connect Gmail first.", 400, "noauth");
     const limit = Number(process.env.MAX_SENDS_PER_DAY) || 40;
     if ((await countSends(a.email, new Date(Date.now() - 24 * 3600 * 1000).toISOString())) >= limit) return fail(`Daily limit of ${limit} reached. Sending resumes tomorrow.`, 429, "cap");
-    if (await hasSent(a.email, to)) return fail("You already emailed this address.", 409, "dupe");
+    if (b.followup) { if ((await countTo(a.email, to)) !== 1) return fail("A follow-up is only allowed after exactly one earlier email.", 409, "dupe"); }
+    else if (await hasSent(a.email, to)) return fail("You already emailed this address.", 409, "dupe");
     let access;
     try { access = (await refreshAccess(decrypt(t.refresh_token_enc))).access_token; }
     catch (e) {

@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-const DEF = { offer: "", signature: "", optout: "If this isn’t relevant, just reply “no” and I won’t email again.", tone: "friendly" };
+const DEF = { offer: "", signature: "", optout: "If this isn’t relevant, just reply “no” and I won’t email again.", tone: "friendly", lang: "en", gap: "normal" };
+const DAY = 864e5;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = async (path, body) => {
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
@@ -36,7 +37,10 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
     try { const r = await fetch("/api/gmail/status"); setGm(r.ok ? await r.json() : { error: true }); } catch { setGm({ error: true }); }
   }
 
-  const queue = leads.filter((l) => l.isShopify && l.email && l.stage === "new" && !isBlocked(l));
+  const queue = leads.filter((l) => l.isShopify && l.email && l.stage === "new" && !isBlocked(l)).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const due = leads.filter((l) => l.stage === "contacted" && l.contactedAt && Date.now() - l.contactedAt > 3 * DAY && l.email && l.fu?.status !== "sent" && !isBlocked(l)).sort((a, b) => a.contactedAt - b.contactedAt);
+  const langOf = (l) => (s.lang === "match" ? l.profile?.lang || "" : "");
+  const setFu = (l, f) => patch(l.domain, { fu: { ...(leadsRef.current.find((x) => x.domain === l.domain)?.fu || {}), ...f } });
   const st = (l) => l.draft?.status || "none";
   const nNone = queue.filter((l) => ["none", "error"].includes(st(l))).length;
   const nReady = queue.filter((l) => st(l) === "ready").length;
@@ -49,7 +53,7 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
   async function draftOne(l) {
     setDraft(l, { status: "drafting", error: "" });
     try {
-      const d = await post("/api/draft", { domain: l.site || l.domain, name: l.name, niche: l.niche, title: l.title, profile: l.profile, offer: s.offer, tone: s.tone });
+      const d = await post("/api/draft", { domain: l.site || l.domain, name: l.name, niche: l.niche, title: l.title, profile: l.profile, offer: s.offer, tone: s.tone, language: langOf(l) });
       setDraft(l, { status: "ready", subject: d.subject, body: compose(d.body), angle: d.angle, error: "" });
     } catch (e) { setDraft(l, { status: "error", error: e.message }); }
   }
@@ -68,13 +72,34 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
     setDraft(l, { status: "sending", error: "" });
     try {
       await post("/api/gmail/send", { to: l.email, subject: l.draft.subject, body: l.draft.body, domain: l.site || l.domain });
-      patch(l.domain, { stage: "contacted", draft: { ...leadsRef.current.find((x) => x.domain === l.domain).draft, status: "sent" } });
+      patch(l.domain, { stage: "contacted", contactedAt: Date.now(), draft: { ...leadsRef.current.find((x) => x.domain === l.domain).draft, status: "sent" } });
       loadGmail();
       return true;
     } catch (e) {
       setDraft(l, { status: "failed", error: e.message });
       if (e.code === "cap" || e.code === "noauth") { stopRef.current = true; setMsg(e.message); loadGmail(); }
       return false;
+    }
+  }
+
+  async function draftFollow(l) {
+    if (s.offer.trim().length < 15) return setMsg("Describe what you offer first.");
+    setFu(l, { status: "drafting", error: "" });
+    try {
+      const d = await post("/api/draft", { mode: "followup", domain: l.site || l.domain, name: l.name, niche: l.niche, title: l.title, profile: l.profile, offer: s.offer, tone: s.tone, language: langOf(l), previous: { subject: l.draft?.subject, body: l.draft?.body } });
+      setFu(l, { status: "ready", subject: d.subject, body: compose(d.body), angle: d.angle, error: "" });
+    } catch (e) { setFu(l, { status: "error", error: e.message }); }
+  }
+
+  async function sendFollow(l) {
+    setFu(l, { status: "sending", error: "" });
+    try {
+      await post("/api/gmail/send", { to: l.email, subject: l.fu.subject, body: l.fu.body, domain: l.site || l.domain, followup: true });
+      setFu(l, { status: "sent" });
+      loadGmail();
+    } catch (e) {
+      setFu(l, { status: "ready", error: e.message });
+      if (e.code === "cap" || e.code === "noauth") { setMsg(e.message); loadGmail(); }
     }
   }
 
@@ -86,7 +111,8 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
       await sendOne(next);
       const more = leadsRef.current.some((l) => l.draft?.status === "approved" && l.stage === "new");
       if (!more || stopRef.current) break;
-      let secs = 45 + Math.floor(Math.random() * 45);
+      const [lo, hi] = { fast: [15, 30], normal: [45, 90], slow: [90, 180] }[s.gap] || [45, 90];
+      let secs = lo + Math.floor(Math.random() * (hi - lo));
       while (secs > 0 && !stopRef.current) { setWait(secs--); await sleep(1000); }
       setWait(0);
     }
@@ -106,7 +132,9 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
         <textarea id="of" value={s.offer} onChange={(e) => setS({ ...s, offer: e.target.value })} placeholder="e.g. I rewrite product pages for Shopify stores so they convert better. I’ll do one page for free to show the difference." />
         <div className="row">
           <div><label htmlFor="sg">Signature (name, business, address)</label><textarea id="sg" style={{ minHeight: 70 }} value={s.signature} onChange={(e) => setS({ ...s, signature: e.target.value })} placeholder={"Romeo\nAscendra Vantage\n12 Example St, City"} /></div>
-          <div><label htmlFor="tn">Tone</label><select id="tn" value={s.tone} onChange={(e) => setS({ ...s, tone: e.target.value })}><option value="friendly">Friendly</option><option value="direct">Direct</option><option value="curious">Curious</option></select>
+          <div><label htmlFor="lg">Language</label><select id="lg" value={s.lang} onChange={(e) => setS({ ...s, lang: e.target.value })}><option value="en">English</option><option value="match">Match each store’s language</option></select>
+            <label htmlFor="gp">Pause between sends</label><select id="gp" value={s.gap} onChange={(e) => setS({ ...s, gap: e.target.value })}><option value="fast">Fast (15 to 30 sec)</option><option value="normal">Normal (45 to 90 sec)</option><option value="slow">Careful (90 to 180 sec)</option></select>
+            <label htmlFor="tn">Tone</label><select id="tn" value={s.tone} onChange={(e) => setS({ ...s, tone: e.target.value })}><option value="friendly">Friendly</option><option value="direct">Direct</option><option value="curious">Curious</option></select>
             <label htmlFor="oo">Opt-out line</label><input id="oo" value={s.optout} onChange={(e) => setS({ ...s, optout: e.target.value })} /></div>
         </div>
       </div>
@@ -134,15 +162,43 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
         <button className="b g" disabled={!nReady} onClick={approveAll}>Approve all ({nReady})</button>
         <button className="b" disabled={sending || !nApproved || !connected} onClick={sendApproved}>{sending ? (wait ? `Next send in ${wait}s` : "Sending…") : `Send approved (${nApproved})`}</button>
         {(drafting || sending) && <button className="b g" onClick={() => { stopRef.current = true; }}>Stop</button>}
-        <p className="note">Approved emails go out one at a time, 45 to 90 seconds apart, to protect your Gmail reputation. Keep this page open while they send.</p>
+        <p className="note">Approved emails go out one at a time with the pause you chose above, to protect your Gmail reputation. Keep this page open while they send.</p>
       </div>
+
+      {due.length > 0 && (
+        <div className="card">
+          <h2>Follow-ups due ({due.length})</h2>
+          <p className="h">Emailed 3 or more days ago. Most replies come after a gentle follow-up. Mark a store Replied in Leads to remove it from this list. Each store gets one follow-up.</p>
+          {due.slice(0, 8).map((l) => {
+            const f = l.fu || {}, k = f.status || "none";
+            return (
+              <div key={l.domain} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, marginTop: 10 }}>
+                <span className="dom">{l.site || l.domain}</span> <span style={{ color: "var(--mute)", fontSize: 13 }}>{l.email}</span>
+                {f.error && <p className="note">{f.error}</p>}
+                {["ready", "sending"].includes(k) && (
+                  <>
+                    <label>Subject</label><input value={f.subject || ""} onChange={(e) => setFu(l, { subject: e.target.value })} />
+                    <label>Message</label><textarea style={{ minHeight: 160 }} value={f.body || ""} onChange={(e) => setFu(l, { body: e.target.value })} />
+                  </>
+                )}
+                <div style={{ marginTop: 8 }}>
+                  {["none", "error"].includes(k) && <button className="b" onClick={() => draftFollow(l)}>Write follow-up</button>}
+                  {k === "drafting" && <span className="h">Writing…</span>}
+                  {k === "ready" && <><button className="b" disabled={!connected} onClick={() => sendFollow(l)}>Send follow-up</button><button className="b g" onClick={() => draftFollow(l)}>Rewrite</button></>}
+                  {k === "sending" && <span className="h">Sending…</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {queue.slice(0, vis).map((l) => {
         const d = l.draft || {}, k = st(l);
         return (
           <div className="card" key={l.domain}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-              <div><span className="dom">{l.site || l.domain}</span> <span style={{ color: "var(--mute)", fontSize: 13 }}>{l.email}</span></div>
+              <div><span className="dom">{l.site || l.domain}</span> <span style={{ color: "var(--mute)", fontSize: 13 }}>{l.email}</span>{l.score != null && <span className={"badge " + (l.score >= 70 ? "ok" : l.score >= 45 ? "warn" : "bad")} style={{ marginLeft: 6 }}>{l.score}</span>}</div>
               <span className={"badge " + (k === "approved" ? "ok" : k === "failed" || k === "error" ? "bad" : k === "ready" ? "warn" : "")}>{k === "none" ? "no draft" : k}</span>
             </div>
             {d.angle && <p className="h" style={{ margin: "6px 0 0" }}>Hook: {d.angle}</p>}
