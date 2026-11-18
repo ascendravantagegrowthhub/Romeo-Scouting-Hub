@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-const DEF = { offer: "", signature: "", optout: "If this isn’t relevant, just reply “no” and I won’t email again.", tone: "friendly", lang: "en", gap: "normal" };
+const DEF = { offer: "", signature: "", optout: "If this isn’t relevant, just reply “no” and I won’t email again.", tone: "friendly", langMode: "auto", gap: "normal" };
 const DAY = 864e5;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = async (path, body) => {
@@ -39,7 +39,6 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
 
   const queue = leads.filter((l) => l.isShopify && l.email && l.stage === "new" && !isBlocked(l)).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const due = leads.filter((l) => l.stage === "contacted" && l.contactedAt && Date.now() - l.contactedAt > 3 * DAY && l.email && l.fu?.status !== "sent" && !isBlocked(l)).sort((a, b) => a.contactedAt - b.contactedAt);
-  const langOf = (l) => (s.lang === "match" ? l.profile?.lang || "" : "");
   const setFu = (l, f) => patch(l.domain, { fu: { ...(leadsRef.current.find((x) => x.domain === l.domain)?.fu || {}), ...f } });
   const st = (l) => l.draft?.status || "none";
   const nNone = queue.filter((l) => ["none", "error"].includes(st(l))).length;
@@ -47,14 +46,14 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
   const nApproved = queue.filter((l) => st(l) === "approved").length;
   const sent = leads.filter((l) => l.draft?.status === "sent").length;
 
-  const compose = (body) => [body.trim(), s.signature.trim(), s.optout.trim()].filter(Boolean).join("\n\n");
+  const compose = (body, translatedOptout) => [body.trim(), s.signature.trim(), (s.langMode === "auto" && translatedOptout ? translatedOptout : s.optout).trim()].filter(Boolean).join("\n\n");
   const setDraft = (l, f) => patch(l.domain, { draft: { ...(leadsRef.current.find((x) => x.domain === l.domain)?.draft || {}), ...f } });
 
   async function draftOne(l) {
     setDraft(l, { status: "drafting", error: "" });
     try {
-      const d = await post("/api/draft", { domain: l.site || l.domain, name: l.name, niche: l.niche, title: l.title, profile: l.profile, offer: s.offer, tone: s.tone, language: langOf(l) });
-      setDraft(l, { status: "ready", subject: d.subject, body: compose(d.body), angle: d.angle, error: "" });
+      const d = await post("/api/draft", { domain: l.site || l.domain, name: l.name, niche: l.niche, title: l.title, profile: l.profile, offer: s.offer, tone: s.tone, langMode: s.langMode, optout: s.optout });
+      setDraft(l, { status: "ready", subject: d.subject, body: compose(d.body, d.optout), angle: d.angle, error: "" });
     } catch (e) { setDraft(l, { status: "error", error: e.message }); }
   }
 
@@ -86,8 +85,8 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
     if (s.offer.trim().length < 15) return setMsg("Describe what you offer first.");
     setFu(l, { status: "drafting", error: "" });
     try {
-      const d = await post("/api/draft", { mode: "followup", domain: l.site || l.domain, name: l.name, niche: l.niche, title: l.title, profile: l.profile, offer: s.offer, tone: s.tone, language: langOf(l), previous: { subject: l.draft?.subject, body: l.draft?.body } });
-      setFu(l, { status: "ready", subject: d.subject, body: compose(d.body), angle: d.angle, error: "" });
+      const d = await post("/api/draft", { mode: "followup", domain: l.site || l.domain, name: l.name, niche: l.niche, title: l.title, profile: l.profile, offer: s.offer, tone: s.tone, langMode: s.langMode, optout: s.optout, previous: { subject: l.draft?.subject, body: l.draft?.body } });
+      setFu(l, { status: "ready", subject: d.subject, body: compose(d.body, d.optout), angle: d.angle, error: "" });
     } catch (e) { setFu(l, { status: "error", error: e.message }); }
   }
 
@@ -132,7 +131,7 @@ export default function Outreach({ leads, patch, isBlocked, suppress, setSuppres
         <textarea id="of" value={s.offer} onChange={(e) => setS({ ...s, offer: e.target.value })} placeholder="e.g. I rewrite product pages for Shopify stores so they convert better. I’ll do one page for free to show the difference." />
         <div className="row">
           <div><label htmlFor="sg">Signature (name, business, address)</label><textarea id="sg" style={{ minHeight: 70 }} value={s.signature} onChange={(e) => setS({ ...s, signature: e.target.value })} placeholder={"Romeo\nAscendra Vantage\n12 Example St, City"} /></div>
-          <div><label htmlFor="lg">Language</label><select id="lg" value={s.lang} onChange={(e) => setS({ ...s, lang: e.target.value })}><option value="en">English</option><option value="match">Match each store’s language</option></select>
+          <div><label htmlFor="lg">Language</label><select id="lg" value={s.langMode} onChange={(e) => setS({ ...s, langMode: e.target.value })}><option value="auto">Auto: write in each store’s language</option><option value="en">Always English</option></select>
             <label htmlFor="gp">Pause between sends</label><select id="gp" value={s.gap} onChange={(e) => setS({ ...s, gap: e.target.value })}><option value="fast">Fast (15 to 30 sec)</option><option value="normal">Normal (45 to 90 sec)</option><option value="slow">Careful (90 to 180 sec)</option></select>
             <label htmlFor="tn">Tone</label><select id="tn" value={s.tone} onChange={(e) => setS({ ...s, tone: e.target.value })}><option value="friendly">Friendly</option><option value="direct">Direct</option><option value="curious">Curious</option></select>
             <label htmlFor="oo">Opt-out line</label><input id="oo" value={s.optout} onChange={(e) => setS({ ...s, optout: e.target.value })} /></div>

@@ -16,7 +16,7 @@ export async function POST(req) {
       domain: String(b.domain || "").slice(0, 100), name: String(b.name || "").slice(0, 40), niche: String(b.niche || "").slice(0, 80),
       title: String(b.title || "").slice(0, 120), profile: b.profile && typeof b.profile === "object" ? b.profile : {},
       offer, tone: ["friendly", "direct", "curious"].includes(b.tone) ? b.tone : "friendly",
-      language: String(b.language || "").slice(0, 8), mode: b.mode === "followup" ? "followup" : "first",
+      langMode: b.langMode === "en" ? "en" : "auto", optout: String(b.optout || "").slice(0, 220), mode: b.mode === "followup" ? "followup" : "first",
       previous: b.previous && typeof b.previous === "object" ? { subject: String(b.previous.subject || "").slice(0, 120), body: String(b.previous.body || "").slice(0, 800) } : null,
     });
     return NextResponse.json(d);
